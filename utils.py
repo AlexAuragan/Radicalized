@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -163,17 +164,49 @@ def find_caldav_item_by_title(items, wanted: str):
             return item
     return None
 
+def _strip_angle_email(s: str):
+    """
+    "Manon <a@b.com>" -> ("Manon", "a@b.com")
+    "Manon" -> ("Manon", None)
+    """
+    m = re.match(r"^\s*(.*?)\s*<\s*([^>]+)\s*>\s*$", s)
+    if not m:
+        return s.strip(), None
+    return m.group(1).strip(), m.group(2).strip()
 
-def find_contact_url_by_name(cm: ContactManager, wanted: str):
-    # list() returns URLs; get(url) returns vobject vCard
+
+def _first_value(v, key: str):
+    # vobject vCard: v.contents['email'] = [ContentLine, ...]
+    if v is None:
+        return None
+    lines = v.contents.get(key, [])
+    if not lines:
+        return None
+    try:
+        return lines[0].value
+    except Exception:
+        return None
+
+def find_contact_url_by_name(cm, wanted: str):
+    wanted_name, wanted_email = _strip_angle_email(wanted)
+
     for url in cm.list():
         try:
             v = cm.get(url)
         except Exception:
             continue
-        name = extract_display_name(v) or ""
-        if name == wanted:
-            return url
+
+        fn = (getattr(v, "fn", None).value if hasattr(v, "fn") else "") or ""
+        email = _first_value(v, "email") or ""
+
+        # Match by "Nom <email>" if provided, otherwise by FN only
+        if wanted_email:
+            if fn.strip() == wanted_name and email.strip().lower() == wanted_email.lower():
+                return url
+        else:
+            if fn.strip() == wanted_name:
+                return url
+
     return None
 
 
