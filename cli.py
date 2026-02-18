@@ -46,15 +46,41 @@ def build_parser():
             add.add_argument("--phone")
             add.add_argument("--address")
 
+
+            g_social = add.add_argument_group("Social networks")
+            g_social.add_argument("--website")
+            g_social.add_argument("--instagram", help="@handle or URL")
+            g_social.add_argument("--linkedin", help="URL")
+            g_social.add_argument("--github", help="handle or URL")
+
+            g_misc = add.add_argument_group("Other")
+            g_misc.add_argument("--birthday", help="YYYY-MM-DD")
+            g_misc.add_argument("--note", help="Any note")
+
         # UPDATE
         update = actions.add_parser("update")
         update.add_argument("--find", required=True)
 
         if kind == "contact":
-            update.add_argument("--new-name")
-            update.add_argument("--new-email")
-            update.add_argument("--new-phone")
-            update.add_argument("--new-address")
+            g_id = update.add_argument_group("Identity")
+            g_id.add_argument("--new-name")
+            g_id.add_argument("--new-org")
+            g_id.add_argument("--new-title")
+
+            g_contact = update.add_argument_group("Contact")
+            g_contact.add_argument("--new-email")
+            g_contact.add_argument("--new-phone")
+            g_contact.add_argument("--new-address")
+
+            g_social = update.add_argument_group("Social networks")
+            g_social.add_argument("--new-website")
+            g_social.add_argument("--new-instagram")
+            g_social.add_argument("--new-linkedin")
+            g_social.add_argument("--new-github")
+
+            g_misc = update.add_argument_group("Other")
+            g_misc.add_argument("--new-birthday")
+            g_misc.add_argument("--new-note")
         else:
             update.add_argument("--new-title")
             update.add_argument("--new-desc")
@@ -114,6 +140,14 @@ def main():
                     email=args.email,
                     phone=args.phone,
                     address=args.address,
+                    org=args.org,
+                    title=args.title,
+                    birthday=args.birthday,
+                    note=args.note,
+                    website=args.website,
+                    instagram=args.instagram,
+                    linkedin=args.linkedin,
+                    github=args.github,
                 )
 
             print("Success")
@@ -132,6 +166,14 @@ def main():
                     new_email=args.new_email,
                     new_phone=args.new_phone,
                     new_address=args.new_address,
+                    new_org=args.new_org,
+                    new_title=args.new_title,
+                    new_birthday=args.new_birthday,
+                    new_note=args.new_note,
+                    new_website=args.new_website,
+                    new_instagram=args.new_instagram,
+                    new_linkedin=args.new_linkedin,
+                    new_github=args.new_github,
                 )
             else:
                 items = mgr.list()
