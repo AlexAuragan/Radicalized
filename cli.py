@@ -1,4 +1,4 @@
-#!~/clawd/skills/radicale/scripts/Radicalized/.venv/bin/python
+#!/home/moltbot/clawd/skills/radicale/scripts/Radicalized/.venv/bin/python
 import argparse
 import sys
 from datetime import datetime
@@ -13,9 +13,6 @@ def build_parser():
     parser = argparse.ArgumentParser(
         description="Radicale CLI (CalDAV + CardDAV)",
     )
-
-    parser.add_argument("--url", help="Override CalDAV URL")
-    parser.add_argument("--addr-url", help="Override CardDAV URL")
 
     top = parser.add_subparsers(dest="kind", required=True)
 
