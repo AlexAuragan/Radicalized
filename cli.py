@@ -1,4 +1,4 @@
-#!/home/clawd/skills/radicale/scripts/Radicalized/.venv/bin/python
+#!~/clawd/skills/radicale/scripts/Radicalized/.venv/bin/python
 import argparse
 import sys
 from datetime import datetime
