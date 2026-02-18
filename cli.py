@@ -1,3 +1,4 @@
+#!~/clawd/skills/radicale/scripts/Radicalized
 import argparse
 import sys
 from datetime import datetime
