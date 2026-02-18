@@ -1,5 +1,6 @@
 import caldav
 from vobject import vCard
+from vobject.vcard import Name, Address
 
 
 class RadicaleManager:
@@ -22,14 +23,39 @@ class RadicaleManager:
         return self.collection.save_journal(summary=summary, description=description)
 
     # --- ADDRESS BOOK (vCard) ---
-    def add_contact(self, name, email, phone=None):
+    def add_contact(self, name, email=None, phone=None, address=None):
         """Adds a CardDAV contact"""
         vcard = vCard()
+
+        # FN
         vcard.add("fn").value = name
-        vcard.add("n").value = vCard().n(family=name.split()[-1], given=name.split()[0])
-        vcard.add("email").value = email
+
+        # N (best-effort split)
+        parts = name.split()
+        given = parts[0] if parts else ""
+        family = parts[-1] if len(parts) > 1 else (parts[0] if parts else "")
+
+        vcard.add("n").value = Name(family=family, given=given)
+
+        # EMAIL (optional)
+        if email:
+            vcard.add("email").value = email
+
+        # TEL (optional)
         if phone:
             vcard.add("tel").value = phone
+
+        # ADR (optional)
+        if address:
+            vcard.add("adr").value = Address(
+                box="",
+                extended="",
+                street=address,  # free-form string goes here
+                city="",
+                region="",
+                code="",
+                country="",
+            )
 
         return self.collection.save_vcard(vcard.serialize())
 

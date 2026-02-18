@@ -1,166 +1,179 @@
-#!/home/moltbot/clawd/skills/radicale/scripts/Radicalized/.venv/bin/python
-import os
-import sys
 import argparse
+import sys
 from datetime import datetime
-from radicale_manager import RadicaleManager
+
 from dotenv import load_dotenv
 
-load_dotenv()
+from utils import find_caldav_item_by_title, find_contact_url_by_name, extract_display_name, get_manager, get_env, \
+    format_contact_extra
 
 
-def get_env(var, default=None):
-    val = os.getenv(var)
-    if not val and default is None:
-        print(f"Error: Environment variable {var} is not set.")
-        sys.exit(1)
-    return val or default
+def build_parser():
+    parser = argparse.ArgumentParser(
+        description="Radicale CLI (CalDAV + CardDAV)",
+    )
+
+    parser.add_argument("--url", help="Override CalDAV URL")
+    parser.add_argument("--addr-url", help="Override CardDAV URL")
+
+    top = parser.add_subparsers(dest="kind", required=True)
+
+    # For each resource type
+    for kind in ["event", "task", "journal", "contact"]:
+        kind_parser = top.add_parser(kind)
+        actions = kind_parser.add_subparsers(dest="action", required=True)
+
+        # LIST
+        actions.add_parser("list")
+
+        # ADD
+        add = actions.add_parser("add")
+
+        if kind == "event":
+            add.add_argument("--title", required=True)
+            add.add_argument("--start", required=True, help="YYYY-MM-DD HH:MM")
+            add.add_argument("--end", required=True, help="YYYY-MM-DD HH:MM")
+
+        elif kind == "task":
+            add.add_argument("--title", required=True)
+            add.add_argument("--priority", type=int, default=5)
+
+        elif kind == "journal":
+            add.add_argument("--title", required=True)
+            add.add_argument("--desc", default="")
+
+        elif kind == "contact":
+            add.add_argument("--name", required=True)
+            add.add_argument("--email")
+            add.add_argument("--phone")
+            add.add_argument("--address")
+
+        # UPDATE
+        update = actions.add_parser("update")
+        update.add_argument("--find", required=True)
+
+        if kind == "contact":
+            update.add_argument("--new-name")
+            update.add_argument("--new-email")
+            update.add_argument("--new-phone")
+            update.add_argument("--new-address")
+        else:
+            update.add_argument("--new-title")
+            update.add_argument("--new-desc")
+
+        # DELETE
+        delete = actions.add_parser("delete")
+        delete.add_argument("--find", required=True)
+
+    return parser
+
 
 
 def main():
-    # 1. Load Credentials
     user = get_env("RADICALE_USER")
     password = get_env("RADICALE_PASS")
 
-    parser = argparse.ArgumentParser(
-        description="Radicale CLI: Unified Manager for Calendar, Tasks, Journals, and Contacts.",
-        formatter_class=argparse.RawTextHelpFormatter,
-    )
-
-    # Global Selection Arguments
-    parser.add_argument("--url", help="Override the target URL entirely")
-    parser.add_argument(
-        "--addr", action="store_true", help="Use the Address Book URL (RADICALE_ADDR)"
-    )
-
-    subparsers = parser.add_subparsers(dest="command", help="Commands")
-
-    # --- COMMAND: LIST ---
-    subparsers.add_parser("list", help="List all items in the selected collection")
-
-    # --- COMMAND: ADD ---
-    add_p = subparsers.add_parser("add", help="Add a new item")
-    add_p.add_argument(
-        "--type", choices=["event", "task", "journal", "contact"], required=True
-    )
-    add_p.add_argument("--title", required=True, help="Summary or Full Name")
-    add_p.add_argument("--desc", help="Description or Email")
-    add_p.add_argument("--start", help="Start time (YYYY-MM-DD HH:MM)")
-    add_p.add_argument("--end", help="End time (YYYY-MM-DD HH:MM)")
-
-    # --- COMMAND: UPDATE ---
-    upd_p = subparsers.add_parser(
-        "update", help="Update an item by searching its current title"
-    )
-    upd_p.add_argument(
-        "--find", required=True, help="Existing title/name to search for"
-    )
-    upd_p.add_argument("--new-title", help="New Summary or Name")
-    upd_p.add_argument("--new-desc", help="New Description or Email")
-
-    # --- COMMAND: DELETE ---
-    del_p = subparsers.add_parser("delete", help="Delete an item by its title")
-    del_p.add_argument("--title", required=True)
-
+    parser = build_parser()
     args = parser.parse_args()
-    if not args.command:
-        parser.print_help()
-        return
 
-    # 2. Logic to choose the correct URL
-    if args.url:
-        target_url = args.url
-    elif args.addr or (args.command == "add" and args.type == "contact"):
-        target_url = get_env("RADICALE_ADDR")
-    else:
-        target_url = get_env("RADICALE_CAL")
-
-    mgr = RadicaleManager(target_url, user, password)
+    cal_url = get_env("RADICALE_CAL")
+    addr_url = get_env("RADICALE_ADDR")
+    mgr = get_manager(args.kind, cal_url=cal_url, addr_url=addr_url, user=user, password=password)
 
     try:
-        if args.command == "list":
-            items = mgr.list_all()
-            print(f"{'TYPE':<12} | {'SUMMARY / NAME':<30}")
+        # ---------------- LIST ----------------
+        if args.action == "list":
+            print(f"{'TYPE':<10} | SUMMARY / NAME")
             print("-" * 50)
-            for item in items:
-                v = item.vobject_instance
-                name = "Unnamed"
-                if hasattr(v, "vevent"):
-                    name = v.vevent.summary.value
-                elif hasattr(v, "vtodo"):
-                    name = v.vtodo.summary.value
-                elif hasattr(v, "vjournal"):
-                    name = v.vjournal.summary.value
-                elif hasattr(v, "vcard"):
-                    name = v.vcard.fn.value
-                print(f"{type(item).__name__:<12} | {name:<30}")
 
-        elif args.command == "add":
-            if args.type == "event":
+            if args.kind == "contact":
+                for url in mgr.list():
+                    v = mgr.get(url)
+                    name = extract_display_name(v) or "Unnamed"
+                    extra = format_contact_extra(v)
+                    print(f"{'contact':<10} | {name}{extra}")
+            else:
+                for item in mgr.list():
+                    name = extract_display_name(item.vobject_instance) or "Unnamed"
+                    print(f"{args.kind:<10} | {name}")
+
+        # ---------------- ADD ----------------
+        elif args.action == "add":
+            if args.kind == "event":
                 s = datetime.strptime(args.start, "%Y-%m-%d %H:%M")
                 e = datetime.strptime(args.end, "%Y-%m-%d %H:%M")
-                mgr.add_event(args.title, s, e)
-            elif args.type == "task":
-                mgr.add_task(args.title)
-            elif args.type == "journal":
-                mgr.add_journal(args.title, args.desc or "")
-            elif args.type == "contact":
-                mgr.add_contact(args.title, args.desc or "")
-            print(f"Success: Added {args.type} '{args.title}'")
+                mgr.add(args.title, s, e)
 
-        elif args.command == "update":
-            items = mgr.list_all()
-            target = None
-            for item in items:
-                v = item.vobject_instance
-                curr = ""
-                if hasattr(v, "vevent"):
-                    curr = v.vevent.summary.value
-                elif hasattr(v, "vtodo"):
-                    curr = v.vtodo.summary.value
-                elif hasattr(v, "vjournal"):
-                    curr = v.vjournal.summary.value
-                elif hasattr(v, "vcard"):
-                    curr = v.vcard.fn.value
-                if curr == args.find:
-                    target = item
-                    break
+            elif args.kind == "task":
+                mgr.add(args.title, priority=args.priority)
 
-            if target:
-                upd = {}
-                is_vc = hasattr(target.vobject_instance, "vcard")
-                if args.new_title:
-                    upd["fn" if is_vc else "summary"] = args.new_title
-                if args.new_desc:
-                    upd["email" if is_vc else "description"] = args.new_desc
-                mgr.update_item(target, upd)
-                print(f"Success: Updated '{args.find}'")
+            elif args.kind == "journal":
+                mgr.add(args.title, desc=args.desc)
+
+            elif args.kind == "contact":
+                mgr.add(
+                    name=args.name,
+                    email=args.email,
+                    phone=args.phone,
+                    address=args.address,
+                )
+
+            print("Success")
+
+        # ---------------- UPDATE ----------------
+        elif args.action == "update":
+            if args.kind == "contact":
+                url = find_contact_url_by_name(mgr, args.find)
+                if not url:
+                    print("Not found")
+                    sys.exit(1)
+
+                mgr.update(
+                    url,
+                    new_name=args.new_name,
+                    new_email=args.new_email,
+                    new_phone=args.new_phone,
+                    new_address=args.new_address,
+                )
             else:
-                print(f"Error: Could not find '{args.find}'")
+                items = mgr.list()
+                target = find_caldav_item_by_title(items, args.find)
+                if not target:
+                    print("Not found")
+                    sys.exit(1)
 
-        elif args.command == "delete":
-            # Finding logic for delete is similar to update
-            items = mgr.list_all()
-            for item in items:
-                v = item.vobject_instance
-                curr = ""
-                if hasattr(v, "vevent"):
-                    curr = v.vevent.summary.value
-                elif hasattr(v, "vtodo"):
-                    curr = v.vtodo.summary.value
-                elif hasattr(v, "vjournal"):
-                    curr = v.vjournal.summary.value
-                elif hasattr(v, "vcard"):
-                    curr = v.vcard.fn.value
-                if curr == args.title:
-                    mgr.delete_item(item)
-                    print(f"Success: Deleted '{args.title}'")
-                    return
-            print(f"Error: '{args.title}' not found.")
+                mgr.update(
+                    target,
+                    new_title=args.new_title,
+                    new_desc=args.new_desc,
+                )
+
+            print("Success")
+
+        # ---------------- DELETE ----------------
+        elif args.action == "delete":
+            if args.kind == "contact":
+                url = find_contact_url_by_name(mgr, args.find)
+                if not url:
+                    print("Not found")
+                    sys.exit(1)
+                mgr.delete(url)
+            else:
+                items = mgr.list()
+                target = find_caldav_item_by_title(items, args.find)
+                if not target:
+                    print("Not found")
+                    sys.exit(1)
+                mgr.delete(target)
+
+            print("Success")
 
     except Exception as e:
         print(f"Operation failed: {e}")
+        raise e
+        sys.exit(1)
 
 
 if __name__ == "__main__":
+    load_dotenv()
     main()
