@@ -1,4 +1,4 @@
-#!./.venv/bin/python
+#!/home/moltbot/clawd/skills/radicale/scripts/Radicalized/.venv/bin/python
 import os
 import sys
 import argparse
