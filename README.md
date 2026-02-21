@@ -8,3 +8,10 @@ tempering with it in an irreversible way.
 Please be sure to:
 > 1. Restrict its online interactions to avoid any prompt injections
 > 2. Regularly backup your data
+
+# Set up
+You can make this script executable with
+```bash
+sudo ln -s ~/clawd/skills/radicale/scripts/Radicalized/cli.py /usr/local/bin/radicale
+```
+Make sure the shebang (#!) at the beginning of cli.py points to the real venv.

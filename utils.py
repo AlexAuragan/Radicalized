@@ -247,26 +247,54 @@ def format_contact_extra(v):
     tels = vcard_values(v, "tel")
     adrs = vcard_values(v, "adr")
 
+    insta = vcard_social(v, "instagram")
+    linkedin = vcard_social(v, "linkedin")
+    github = vcard_social(v, "github")
+
     parts = []
 
     if emails:
-        # display one (or join if you prefer)
         parts.append(f"<{emails[0]}>")
+
+    if insta:
+        parts.append(f"ig:{insta}")
+
+    if linkedin:
+        parts.append("li")
+
+    if github:
+        parts.append("gh")
+
 
     if tels:
         parts.append(f"tel:{tels[0]}")
 
     if adrs:
-        # adr value is usually an Address object; put something readable
         adr = adrs[0]
         try:
-            # vobject Address has fields like street/city/code/country
             adr_parts = [adr.street, adr.city, adr.code, adr.country]
             adr_str = ", ".join([p for p in adr_parts if p])
         except Exception:
             adr_str = str(adr)
-
         if adr_str:
             parts.append(adr_str)
 
     return (" " + " | ".join(parts)) if parts else ""
+
+def vcard_social(v, social_type: str):
+    """
+    Return the first X-SOCIALPROFILE url matching TYPE=social_type
+    """
+    if v is None:
+        return None
+    lines = v.contents.get("x-socialprofile", [])
+    for line in lines:
+        try:
+            types = []
+            if hasattr(line, "params") and "TYPE" in line.params:
+                types = [t.lower() for t in line.params["TYPE"]]
+            if social_type.lower() in types:
+                return line.value
+        except Exception:
+            continue
+    return None
