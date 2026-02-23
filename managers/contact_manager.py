@@ -69,22 +69,22 @@ class ContactManager:
         )
 
     def _build_vcard_text(
-            self,
-            *,
-            name: str,
-            email=None,
-            phone=None,
-            address=None,
-            org=None,
-            title=None,
-            birthday=None,
-            note=None,
-            website=None,
-            instagram=None,
-            linkedin=None,
-            github=None,
-            uid=None,
-            version="3.0",
+        self,
+        *,
+        name: str,
+        email=None,
+        phone=None,
+        address=None,
+        org=None,
+        title=None,
+        birthday=None,
+        note=None,
+        website=None,
+        instagram=None,
+        linkedin=None,
+        github=None,
+        uid=None,
+        version="3.0",
     ) -> str:
         uid = uid or str(uuid.uuid4())
 
@@ -127,7 +127,9 @@ class ContactManager:
             if not value:
                 return
             url = self._normalize_handle_url(value, base=base, at_ok=at_ok)
-            lines.append(f"X-SOCIALPROFILE;TYPE={social_type}:{self._vcard_escape(url)}")
+            lines.append(
+                f"X-SOCIALPROFILE;TYPE={social_type}:{self._vcard_escape(url)}"
+            )
 
         add_social("instagram", instagram, "https://instagram.com", at_ok=True)
         add_social("linkedin", linkedin, "https://linkedin.com/in", at_ok=False)
@@ -137,21 +139,19 @@ class ContactManager:
         return "\r\n".join(lines) + "\r\n"
 
     def add(
-            self,
-            *,
-            name: str,
-            email=None,
-            phone=None,
-            address=None,
-            org=None,
-            title=None,
-            birthday=None,
-            note=None,
-            website=None,
-            instagram=None,
-            linkedin=None,
-            github=None,
-            twitter=None,
+        self,
+        *,
+        name: str,
+        email=None,
+        phone=None,
+        address=None,
+        org=None,
+        birthday=None,
+        note=None,
+        website=None,
+        instagram=None,
+        linkedin=None,
+        github=None,
     ):
         filename = f"{uuid.uuid4()}.vcf"
         url = urljoin(self.base, filename)
@@ -162,7 +162,6 @@ class ContactManager:
             phone=phone,
             address=address,
             org=org,
-            title=title,
             birthday=birthday,
             note=note,
             website=website,
@@ -182,6 +181,7 @@ class ContactManager:
         )
         r.raise_for_status()
         return url
+
     def get(self, url: str):
         r = self._req("GET", url)
         r.raise_for_status()
@@ -192,24 +192,22 @@ class ContactManager:
         r.raise_for_status()
 
     def update(
-            self,
-            url: str,
-            *,
-            new_name=None,
-            new_email=None,
-            new_phone=None,
-            new_address=None,
-            new_org=None,
-            new_title=None,
-            new_birthday=None,
-            new_note=None,
-            new_website=None,
-            new_instagram=None,
-            new_linkedin=None,
-            new_github=None,
-            new_twitter=None,
+        self,
+        url: str,
+        *,
+        new_name=None,
+        new_email=None,
+        new_phone=None,
+        new_address=None,
+        new_org=None,
+        new_birthday=None,
+        new_note=None,
+        new_website=None,
+        new_instagram=None,
+        new_linkedin=None,
+        new_github=None,
+        new_twitter=None,
     ):
-
         v = self.get(url)
 
         # identité
@@ -223,8 +221,6 @@ class ContactManager:
 
         if new_org is not None:
             self._set_or_add_single(v, "org", new_org)
-        if new_title is not None:
-            self._set_or_add_single(v, "title", new_title)
 
         # contact
         if new_email is not None:
@@ -245,23 +241,33 @@ class ContactManager:
             self._set_or_add_single(v, "url", new_website)
 
         if new_instagram is not None:
-            ig = self._normalize_handle_url(new_instagram, "https://instagram.com", at_ok=True)
+            ig = self._normalize_handle_url(
+                new_instagram, "https://instagram.com", at_ok=True
+            )
             self._set_social(v, "instagram", ig)
 
         if new_linkedin is not None:
-            li = self._normalize_handle_url(new_linkedin, "https://linkedin.com/in", at_ok=False)
+            li = self._normalize_handle_url(
+                new_linkedin, "https://linkedin.com/in", at_ok=False
+            )
             self._set_social(v, "linkedin", li)
 
         if new_github is not None:
-            gh = self._normalize_handle_url(new_github, "https://github.com", at_ok=False)
+            gh = self._normalize_handle_url(
+                new_github, "https://github.com", at_ok=False
+            )
             self._set_social(v, "github", gh)
 
         if new_twitter is not None:
-            tw = self._normalize_handle_url(new_twitter, "https://twitter.com", at_ok=True)
+            tw = self._normalize_handle_url(
+                new_twitter, "https://twitter.com", at_ok=True
+            )
             self._set_social(v, "twitter", tw)
 
         payload = v.serialize()
-        payload = payload.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
+        payload = (
+            payload.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
+        )
         if not payload.endswith("\r\n"):
             payload += "\r\n"
 
@@ -298,7 +304,11 @@ class ContactManager:
         kept = []
         for line in v.contents[key]:
             t = ""
-            if hasattr(line, "params") and "TYPE" in line.params and len(line.params["TYPE"]) > 0:
+            if (
+                hasattr(line, "params")
+                and "TYPE" in line.params
+                and len(line.params["TYPE"]) > 0
+            ):
                 t = line.params["TYPE"][0]
             if str(t).lower() != social_type.lower():
                 kept.append(line)

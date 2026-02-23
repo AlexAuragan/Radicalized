@@ -5,8 +5,14 @@ from datetime import datetime
 
 from dotenv import load_dotenv
 
-from utils import find_caldav_item_by_title, find_contact_url_by_name, extract_display_name, get_manager, get_env, \
-    format_contact_extra
+from utils import (
+    find_caldav_item_by_title,
+    find_contact_url_by_name,
+    extract_display_name,
+    get_manager,
+    get_env,
+    format_contact_extra,
+)
 
 
 def build_parser():
@@ -45,7 +51,7 @@ def build_parser():
             add.add_argument("--email")
             add.add_argument("--phone")
             add.add_argument("--address")
-
+            add.add_argument("--org", help="Organization or company name (vCard ORG)")
 
             g_social = add.add_argument_group("Social networks")
             g_social.add_argument("--website")
@@ -65,7 +71,6 @@ def build_parser():
             g_id = update.add_argument_group("Identity")
             g_id.add_argument("--new-name")
             g_id.add_argument("--new-org")
-            g_id.add_argument("--new-title")
 
             g_contact = update.add_argument_group("Contact")
             g_contact.add_argument("--new-email")
@@ -92,7 +97,6 @@ def build_parser():
     return parser
 
 
-
 def main():
     user = get_env("RADICALE_USER")
     password = get_env("RADICALE_PASS")
@@ -102,7 +106,9 @@ def main():
 
     cal_url = get_env("RADICALE_CAL")
     addr_url = get_env("RADICALE_ADDR")
-    mgr = get_manager(args.kind, cal_url=cal_url, addr_url=addr_url, user=user, password=password)
+    mgr = get_manager(
+        args.kind, cal_url=cal_url, addr_url=addr_url, user=user, password=password
+    )
 
     try:
         # ---------------- LIST ----------------
@@ -141,7 +147,6 @@ def main():
                     phone=args.phone,
                     address=args.address,
                     org=args.org,
-                    title=args.title,
                     birthday=args.birthday,
                     note=args.note,
                     website=args.website,
@@ -167,7 +172,6 @@ def main():
                     new_phone=args.new_phone,
                     new_address=args.new_address,
                     new_org=args.new_org,
-                    new_title=args.new_title,
                     new_birthday=args.new_birthday,
                     new_note=args.new_note,
                     new_website=args.new_website,
