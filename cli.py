@@ -25,7 +25,8 @@ def build_parser():
     # For each resource type
     for kind in ["event", "task", "journal", "contact"]:
         kind_parser = top.add_parser(kind)
-        actions = kind_parser.add_subparsers(dest="action", required=True)
+        kind_parser.set_defaults(_kind_parser=kind_parser)
+        actions = kind_parser.add_subparsers(dest="action", required=False)
 
         # LIST
         actions.add_parser("list")
@@ -41,6 +42,18 @@ def build_parser():
         elif kind == "task":
             add.add_argument("--title", required=True)
             add.add_argument("--priority", type=int, default=5)
+            add.add_argument("--desc")
+            add.add_argument("--due", help="YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS")
+            add.add_argument("--start", help="YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS")
+            add.add_argument(
+                "--status", help="NEEDS-ACTION | IN-PROCESS | COMPLETED | CANCELLED"
+            )
+            add.add_argument("--percent-complete", type=int, dest="percent_complete")
+            add.add_argument(
+                "--categories", nargs="+", help="One or more category strings"
+            )
+            add.add_argument("--location")
+            add.add_argument("--url")
 
         elif kind == "journal":
             add.add_argument("--title", required=True)
@@ -86,6 +99,29 @@ def build_parser():
             g_misc = update.add_argument_group("Other")
             g_misc.add_argument("--new-birthday")
             g_misc.add_argument("--new-note")
+        elif kind == "task":
+            update.add_argument("--new-title")
+            update.add_argument("--new-desc")
+            update.add_argument("--new-priority", type=int, dest="new_priority")
+            update.add_argument(
+                "--new-due", dest="new_due", help="YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS"
+            )
+            update.add_argument(
+                "--new-start",
+                dest="new_start",
+                help="YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS",
+            )
+            update.add_argument(
+                "--new-status",
+                dest="new_status",
+                help="NEEDS-ACTION | IN-PROCESS | COMPLETED | CANCELLED",
+            )
+            update.add_argument(
+                "--new-percent-complete", type=int, dest="new_percent_complete"
+            )
+            update.add_argument("--new-categories", nargs="+", dest="new_categories")
+            update.add_argument("--new-location", dest="new_location")
+            update.add_argument("--new-url", dest="new_url")
         else:
             update.add_argument("--new-title")
             update.add_argument("--new-desc")
@@ -103,6 +139,10 @@ def main():
 
     parser = build_parser()
     args = parser.parse_args()
+
+    if not args.action:
+        args._kind_parser.print_help()
+        sys.exit(0)
 
     cal_url = get_env("RADICALE_CAL")
     addr_url = get_env("RADICALE_ADDR")
@@ -135,7 +175,18 @@ def main():
                 mgr.add(args.title, s, e)
 
             elif args.kind == "task":
-                mgr.add(args.title, priority=args.priority)
+                mgr.add(
+                    args.title,
+                    priority=args.priority,
+                    description=args.desc,
+                    due=args.due,
+                    start=args.start,
+                    status=args.status,
+                    percent_complete=args.percent_complete,
+                    categories=args.categories,
+                    location=args.location,
+                    url=args.url,
+                )
 
             elif args.kind == "journal":
                 mgr.add(args.title, desc=args.desc)
@@ -186,11 +237,26 @@ def main():
                     print("Not found")
                     sys.exit(1)
 
-                mgr.update(
-                    target,
-                    new_title=args.new_title,
-                    new_desc=args.new_desc,
-                )
+                if args.kind == "task":
+                    mgr.update(
+                        target,
+                        new_title=args.new_title,
+                        new_description=args.new_desc,
+                        new_priority=args.new_priority,
+                        new_due=args.new_due,
+                        new_start=args.new_start,
+                        new_status=args.new_status,
+                        new_percent_complete=args.new_percent_complete,
+                        new_categories=args.new_categories,
+                        new_location=args.new_location,
+                        new_url=args.new_url,
+                    )
+                else:
+                    mgr.update(
+                        target,
+                        new_title=args.new_title,
+                        new_desc=args.new_desc,
+                    )
 
             print("Success")
 

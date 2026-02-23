@@ -3,7 +3,6 @@ from urllib.parse import urljoin, urlparse
 
 import requests
 import vobject
-from vobject.vcard import Name, Address
 from xml.etree import ElementTree as ET
 
 
@@ -72,18 +71,18 @@ class ContactManager:
         self,
         *,
         name: str,
-        email=None,
-        phone=None,
-        address=None,
-        org=None,
-        title=None,
-        birthday=None,
-        note=None,
-        website=None,
-        instagram=None,
-        linkedin=None,
-        github=None,
-        uid=None,
+        email: str = None,
+        phone: str = None,
+        address: str = None,
+        org: str = None,
+        title: str = None,
+        birthday: str = None,
+        note: str = None,
+        website: str = None,
+        instagram: str = None,
+        linkedin: str = None,
+        github: str = None,
+        uid: str = None,
         version="3.0",
     ) -> str:
         uid = uid or str(uuid.uuid4())
