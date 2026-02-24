@@ -61,32 +61,105 @@ class CalendarManager:
         keep_existing: bool = True,
     ) -> dict:
         """
-        Invite attendees by using Google Calendar as the scheduling/invite engine.
-
-        This takes the VEVENT UID from the CalDAV item, finds the corresponding
-        Google event via iCalUID, and patches attendees with sendUpdates so
-        Google emails invitations.
+            Invite attendees by using Google Calendar as the scheduling/invite engine,
+        AND persist the same attendees into the CalDAV VEVENT so the next vdirsyncer
+        run doesn't remove them (which would trigger "canceled" emails).
 
         Note: the item must have already been synced to Google for this to work.
         """
+        # Best-effort: ensure the event exists in Google before we patch it.
         try:
             sync_caldav_google()
-        except Exception as e:
+        except Exception:
             print("Sync between CalDAV and Google Calendar failed, ignoring")
+
         v = item.vobject_instance
         if not hasattr(v, "vevent"):
             raise ValueError("Not a VEVENT")
 
         ev = v.vevent
-        if not hasattr(ev, "uid") or not getattr(ev.uid, "value", None):
+        if not hasattr(ev, "uid") or not ev.uid.value:
             raise ValueError("VEVENT has no UID; cannot invite by iCalUID.")
+
+        # Normalize emails to a de-duped list (case-insensitive), preserving order.
+        if isinstance(emails, str):
+            raw_emails = [emails]
+        else:
+            raw_emails = list(emails)
+
+        norm_emails = []
+        seen = set()
+        for e in raw_emails:
+            e2 = e.strip()
+            if not e2:
+                continue
+            key = e2.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            norm_emails.append(e2)
+
+        if not norm_emails:
+            raise ValueError("No attendee emails provided.")
 
         ical_uid = ev.uid.value
 
-        return invite_attendees_by_icaluid(
+        # 1) Invite via Google (sends emails)
+        updated = invite_attendees_by_icaluid(
             self.google_service,
             ical_uid,
-            emails,
+            norm_emails,
             send_updates=send_updates,
             keep_existing=keep_existing,
         )
+
+        # 2) Persist attendees into the CalDAV event too, so sync won't "remove" them.
+        existing_attendees = set()
+        if hasattr(ev, "attendee"):
+            att = ev.attendee
+            # vobject: can be a list if multiple ATTENDEE properties exist
+            if isinstance(att, list):
+                for a in att:
+                    if hasattr(a, "value") and a.value:
+                        existing_attendees.add(a.value.strip().lower())
+            else:
+                if hasattr(att, "value") and att.value:
+                    existing_attendees.add(att.value.strip().lower())
+
+        # Add missing ATTENDEE lines
+        changed = False
+        for email in norm_emails:
+            mailto = f"mailto:{email}"
+            if mailto.lower() in existing_attendees:
+                continue
+
+            a = ev.add("attendee")
+            a.value = mailto
+            # Minimal params to make it sane for most clients
+            a.params["CUTYPE"] = ["INDIVIDUAL"]
+            a.params["ROLE"] = ["REQ-PARTICIPANT"]
+            a.params["PARTSTAT"] = ["NEEDS-ACTION"]
+            a.params["RSVP"] = ["TRUE"]
+            changed = True
+
+        # Ensure ORGANIZER exists (helps some clients; also reduces weirdness)
+        # If you don't want this, you can remove this block.
+        if not hasattr(ev, "organizer"):
+            try:
+                a = (
+                    self.google_service.calendarList()
+                    .get(calendarId="primary")
+                    .execute()
+                )
+                primary_email = a.get("id")
+                if primary_email:
+                    org = ev.add("organizer")
+                    org.value = f"mailto:{primary_email}"
+            except Exception:
+                # If we can't resolve it, don't block invites.
+                pass
+
+        if changed:
+            item.save()
+
+        return updated
