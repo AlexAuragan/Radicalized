@@ -38,6 +38,11 @@ def build_parser():
             add.add_argument("--title", required=True)
             add.add_argument("--start", required=True, help="YYYY-MM-DD HH:MM")
             add.add_argument("--end", required=True, help="YYYY-MM-DD HH:MM")
+            add.add_argument(
+                "--invite",
+                nargs="+",
+                help="One or more attendee emails to invite via Google Calendar API",
+            )
 
         elif kind == "task":
             add.add_argument("--title", required=True)
@@ -80,7 +85,15 @@ def build_parser():
         update = actions.add_parser("update")
         update.add_argument("--find", required=True)
 
-        if kind == "contact":
+        if kind == "event":
+            update.add_argument("--new-title")
+            update.add_argument("--new-desc")
+            update.add_argument(
+                "--invite",
+                nargs="+",
+                help="One or more attendee emails to invite via Google Calendar API",
+            )
+        elif kind == "contact":
             g_id = update.add_argument_group("Identity")
             g_id.add_argument("--new-name")
             g_id.add_argument("--new-org")
@@ -172,7 +185,10 @@ def main():
             if args.kind == "event":
                 s = datetime.strptime(args.start, "%Y-%m-%d %H:%M")
                 e = datetime.strptime(args.end, "%Y-%m-%d %H:%M")
-                mgr.add(args.title, s, e)
+                created = mgr.add(args.title, s, e)
+
+                if args.invite:
+                    mgr.invite(created, args.invite)
 
             elif args.kind == "task":
                 mgr.add(
@@ -257,6 +273,9 @@ def main():
                         new_title=args.new_title,
                         new_desc=args.new_desc,
                     )
+
+                    if args.kind == "event" and args.invite:
+                        mgr.invite(target, args.invite)
 
             print("Success")
 

@@ -4,6 +4,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from typing import Union, Sequence
 
 import requests
 import vobject
@@ -13,6 +14,34 @@ from managers.contact_manager import ContactManager
 from managers.journal_manager import JournalManager
 from managers.task_manager import TaskManager
 
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
+from googleapiclient.discovery import build
+import os
+import pickle
+
+SCOPES = ["https://www.googleapis.com/auth/calendar"]
+
+
+def get_google_service():
+    creds = None
+
+    if os.path.exists("token.pkl"):
+        with open("token.pkl", "rb") as f:
+            creds = pickle.load(f)
+
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
+            creds = flow.run_local_server(port=0)
+
+        with open("token.pkl", "wb") as f:
+            pickle.dump(creds, f)
+
+    return build("calendar", "v3", credentials=creds)
+
 
 def get_env(var, default=None):
     val = os.getenv(var)
@@ -20,6 +49,7 @@ def get_env(var, default=None):
         print(f"Error: Environment variable {var} is not set.")
         sys.exit(1)
     return val or default
+
 
 def extract_vobject(raw, user: str, password: str):
     """
@@ -41,7 +71,6 @@ def extract_vobject(raw, user: str, password: str):
     return None
 
 
-
 def extract_href(raw):
     """
     Best-effort identifier for printing / fallback:
@@ -53,7 +82,6 @@ def extract_href(raw):
     if hasattr(raw, "url"):
         return str(raw.url)
     return repr(raw)
-
 
 
 def extract_display_name(vobj):
@@ -164,6 +192,7 @@ def find_caldav_item_by_title(items, wanted: str):
             return item
     return None
 
+
 def _strip_angle_email(s: str):
     """
     "Manon <a@b.com>" -> ("Manon", "a@b.com")
@@ -187,6 +216,7 @@ def _first_value(v, key: str):
     except Exception:
         return None
 
+
 def find_contact_url_by_name(cm, wanted: str):
     wanted_name, wanted_email = _strip_angle_email(wanted)
 
@@ -201,7 +231,10 @@ def find_contact_url_by_name(cm, wanted: str):
 
         # Match by "Nom <email>" if provided, otherwise by FN only
         if wanted_email:
-            if fn.strip() == wanted_name and email.strip().lower() == wanted_email.lower():
+            if (
+                fn.strip() == wanted_name
+                and email.strip().lower() == wanted_email.lower()
+            ):
                 return url
         else:
             if fn.strip() == wanted_name:
@@ -215,7 +248,9 @@ def find_contact_url_by_name(cm, wanted: str):
 # ----------------------------
 def get_manager(kind: str, *, cal_url: str, addr_url: str, user: str, password: str):
     if kind == "event":
-        return CalendarManager(cal_url, user, password)
+        return CalendarManager(
+            cal_url, user, password, google_service=get_google_service()
+        )
     if kind == "task":
         return TaskManager(cal_url, user, password)
     if kind == "journal":
@@ -223,6 +258,7 @@ def get_manager(kind: str, *, cal_url: str, addr_url: str, user: str, password: 
     if kind == "contact":
         return ContactManager(addr_url, user, password)
     raise ValueError(f"Unknown kind: {kind}")
+
 
 def vcard_values(v, key: str):
     """
@@ -265,7 +301,6 @@ def format_contact_extra(v):
     if github:
         parts.append("gh")
 
-
     if tels:
         parts.append(f"tel:{tels[0]}")
 
@@ -280,6 +315,7 @@ def format_contact_extra(v):
             parts.append(adr_str)
 
     return (" " + " | ".join(parts)) if parts else ""
+
 
 def vcard_social(v, social_type: str):
     """
