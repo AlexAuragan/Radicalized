@@ -24,20 +24,31 @@ SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
 
 def get_google_service():
+    base_dir = Path(__file__).resolve().parent
+    credentials_path = base_dir / "credentials.json"
+    token_path = base_dir / "token.pkl"
+
     creds = None
 
-    if os.path.exists("token.pkl"):
-        with open("token.pkl", "rb") as f:
+    if token_path.exists():
+        with open(token_path, "rb") as f:
             creds = pickle.load(f)
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
+            if not credentials_path.exists():
+                raise FileNotFoundError(
+                    f"Google OAuth credentials not found at {credentials_path}"
+                )
+
+            flow = InstalledAppFlow.from_client_secrets_file(
+                str(credentials_path), SCOPES
+            )
             creds = flow.run_local_server(port=0)
 
-        with open("token.pkl", "wb") as f:
+        with open(token_path, "wb") as f:
             pickle.dump(creds, f)
 
     return build("calendar", "v3", credentials=creds)
