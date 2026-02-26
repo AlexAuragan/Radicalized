@@ -1,24 +1,49 @@
 import uuid
+from dataclasses import dataclass
+from typing import Optional
 from urllib.parse import urljoin, urlparse
 
 import requests
 import vobject
 from xml.etree import ElementTree as ET
 
+from managers.manager import Manager
 
-class ContactManager:
+
+@dataclass(frozen=True)
+class Contact:
+    url: str
+    uid: str
+    name: str = ""
+    email: str = ""
+    phone: str = ""
+    address: str = ""
+    org: str = ""
+    title: str = ""
+    birthday: str = ""
+    note: str = ""
+    website: str = ""
+
+    def serialize(self):
+        return str(self)
+
+
+class ContactManager(Manager[Contact]):
     def __init__(self, addressbook_url: str, username: str, password: str):
-        # Make sure it ends with /
-        if not addressbook_url.endswith("/"):
-            addressbook_url += "/"
-        self.base = addressbook_url
-        self.auth = (username, password)
+        super().__init__(addressbook_url, username, password)
+        self.calendar = self.client.calendar(url=addressbook_url)
 
     def _req(self, method: str, url: str, **kwargs):
         return requests.request(method, url, auth=self.auth, timeout=20, **kwargs)
 
-    def list(self):
-        # Minimal PROPFIND asking for getetag; main goal is to get <href> entries
+    # ----------------------------
+    # Listing
+    # ----------------------------
+
+    def list_urls(self) -> list[str]:
+        """
+        Cheap listing: returns .vcf URLs without downloading each vCard.
+        """
         body = """<?xml version="1.0" encoding="utf-8" ?>
 <d:propfind xmlns:d="DAV:">
   <d:prop><d:getetag/></d:prop>
@@ -32,11 +57,10 @@ class ContactManager:
         )
         r.raise_for_status()
 
-        # Parse DAV multistatus
         root = ET.fromstring(r.text)
         ns = {"d": "DAV:"}
 
-        hrefs = []
+        hrefs: list[str] = []
         base_path = urlparse(self.base).path.rstrip("/") + "/"
 
         for resp in root.findall(".//d:response", ns):
@@ -45,7 +69,6 @@ class ContactManager:
                 continue
 
             href_text = href_el.text
-            # href in responses may be path-only; normalize to absolute
             abs_url = urljoin(self.base, href_text)
 
             # Skip the collection itself
@@ -56,6 +79,26 @@ class ContactManager:
                 hrefs.append(abs_url)
 
         return hrefs
+
+    def list(self, limit: int = 200) -> list[Contact]:
+        """
+        Object listing: fetches up to `limit` vCards and returns Contact objects.
+        """
+        urls = self.list_urls()[:limit]
+        out: list[Contact] = []
+
+        for url in urls:
+            try:
+                v = self.request(url)
+            except Exception:
+                continue
+            out.append(self._contact_from_vobject(url, v))
+
+        return out
+
+    # ----------------------------
+    # vCard building / parsing
+    # ----------------------------
 
     def _vcard_escape(self, s: str) -> str:
         # vCard text escaping: \, ;, , and newlines
@@ -126,9 +169,7 @@ class ContactManager:
             if not value:
                 return
             url = self._normalize_handle_url(value, base=base, at_ok=at_ok)
-            lines.append(
-                f"X-SOCIALPROFILE;TYPE={social_type}:{self._vcard_escape(url)}"
-            )
+            lines.append(f"X-SOCIALPROFILE;TYPE={social_type}:{self._vcard_escape(url)}")
 
         add_social("instagram", instagram, "https://instagram.com", at_ok=True)
         add_social("linkedin", linkedin, "https://linkedin.com/in", at_ok=False)
@@ -136,6 +177,46 @@ class ContactManager:
 
         lines.append("END:VCARD")
         return "\r\n".join(lines) + "\r\n"
+
+    def _contact_from_vobject(self, url: str, v) -> Contact:
+        def first_value(key: str) -> str:
+            if key in v.contents and v.contents[key]:
+                val = v.contents[key][0].value
+                return "" if val is None else str(val).strip()
+            return ""
+
+        uid = first_value("uid")
+        name = first_value("fn")
+        email = first_value("email")
+        phone = first_value("tel")
+        org = first_value("org")
+        title = first_value("title")
+        birthday = first_value("bday")
+        note = first_value("note")
+        website = first_value("url")
+
+        address = ""
+        if "adr" in v.contents and v.contents["adr"]:
+            adr_val = v.contents["adr"][0].value
+            address = "" if adr_val is None else str(adr_val).strip()
+
+        return Contact(
+            url=url,
+            uid=uid,
+            name=name,
+            email=email,
+            phone=phone,
+            address=address,
+            org=org,
+            title=title,
+            birthday=birthday,
+            note=note,
+            website=website,
+        )
+
+    # ----------------------------
+    # CRUD
+    # ----------------------------
 
     def add(
         self,
@@ -151,7 +232,7 @@ class ContactManager:
         instagram=None,
         linkedin=None,
         github=None,
-    ):
+    ) -> Contact:
         filename = f"{uuid.uuid4()}.vcf"
         url = urljoin(self.base, filename)
 
@@ -179,20 +260,17 @@ class ContactManager:
             data=payload.encode("utf-8"),
         )
         r.raise_for_status()
-        return url
 
-    def get(self, url: str):
-        r = self._req("GET", url)
-        r.raise_for_status()
-        return vobject.readOne(r.text)
+        v = self.request(url)
+        return self._contact_from_vobject(url, v)
 
-    def delete(self, url: str):
-        r = self._req("DELETE", url)
+    def delete(self, item: Contact):
+        r = self._req("DELETE", item.url)
         r.raise_for_status()
 
     def update(
         self,
-        url: str,
+        item: Contact,
         *,
         new_name=None,
         new_email=None,
@@ -206,8 +284,9 @@ class ContactManager:
         new_linkedin=None,
         new_github=None,
         new_twitter=None,
-    ):
-        v = self.get(url)
+    ) -> Contact:
+        url = item.url
+        v = self.request(url)
 
         # identité
         if new_name is not None:
@@ -252,21 +331,15 @@ class ContactManager:
             self._set_social(v, "linkedin", li)
 
         if new_github is not None:
-            gh = self._normalize_handle_url(
-                new_github, "https://github.com", at_ok=False
-            )
+            gh = self._normalize_handle_url(new_github, "https://github.com", at_ok=False)
             self._set_social(v, "github", gh)
 
         if new_twitter is not None:
-            tw = self._normalize_handle_url(
-                new_twitter, "https://twitter.com", at_ok=True
-            )
+            tw = self._normalize_handle_url(new_twitter, "https://twitter.com", at_ok=True)
             self._set_social(v, "twitter", tw)
 
         payload = v.serialize()
-        payload = (
-            payload.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
-        )
+        payload = payload.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
         if not payload.endswith("\r\n"):
             payload += "\r\n"
 
@@ -277,7 +350,13 @@ class ContactManager:
             data=payload.encode("utf-8"),
         )
         r.raise_for_status()
-        return url
+
+        v2 = self.request(url)
+        return self._contact_from_vobject(url, v2)
+
+    # ----------------------------
+    # Helpers for socials + vobject mutations
+    # ----------------------------
 
     def _normalize_handle_url(self, value: str, base: str, at_ok=True) -> str:
         v = value.strip()
@@ -303,11 +382,7 @@ class ContactManager:
         kept = []
         for line in v.contents[key]:
             t = ""
-            if (
-                hasattr(line, "params")
-                and "TYPE" in line.params
-                and len(line.params["TYPE"]) > 0
-            ):
+            if "TYPE" in line.params and len(line.params["TYPE"]) > 0:
                 t = line.params["TYPE"][0]
             if str(t).lower() != social_type.lower():
                 kept.append(line)
@@ -319,3 +394,62 @@ class ContactManager:
         line = v.add("x-socialprofile")
         line.params["TYPE"] = [social_type]
         line.value = url
+
+    # ----------------------------
+    # Convenience methods
+    # ----------------------------
+
+    def summary(self, limit: int = 50) -> str:
+        """
+        Display a short list of contacts (FN + EMAIL/TEL if present).
+        `limit` avoids hammering the server if you have lots of vcards.
+        """
+        contacts = self.list(limit=limit)
+
+        lines: list[str] = []
+        for c in contacts:
+            label = c.name or "(no name)"
+            bits = []
+            if c.email:
+                bits.append(c.email)
+            if c.phone:
+                bits.append(c.phone)
+
+            if c.uid:
+                lines.append(f"- {label} (UID: {c.uid})")
+            else:
+                lines.append(f"- {label}")
+
+            if bits:
+                lines.append("  " + " / ".join(bits))
+
+        if not lines:
+            return "No contacts."
+
+        total_urls = len(self.list_urls())
+        if len(contacts) < total_urls:
+            lines.append(f"\n(showing first {limit})")
+
+        return "\n".join(lines)
+
+    def get(self, uid: str, *, limit: int = 200) -> Contact | None:
+        """
+        Find a contact by vCard UID. Returns the Contact object or None.
+
+        `limit` avoids scanning your whole addressbook in huge collections.
+        """
+        urls = self.list_urls()[:limit]
+        target = uid.strip()
+
+        for url in urls:
+            try:
+                v = self.request(url)
+            except Exception:
+                continue
+
+            if "uid" in v.contents and v.contents["uid"] and v.contents["uid"][0].value:
+                v_uid = str(v.contents["uid"][0].value).strip()
+                if v_uid == target:
+                    return self._contact_from_vobject(url, v)
+
+        return None

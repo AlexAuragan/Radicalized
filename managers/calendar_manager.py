@@ -1,14 +1,15 @@
 import os
-from datetime import datetime
+from datetime import datetime, time, timedelta
 from typing import Sequence, Union
 
 import caldav
-import vobject
+from caldav import CalendarObjectResource
 
+from managers.manager import Manager
 from managers.utils import invite_attendees_by_icaluid, sync_caldav_google
 
 
-class CalendarManager:
+class CalendarManager(Manager[CalendarObjectResource]):
     def __init__(
         self,
         url: str,
@@ -18,23 +19,40 @@ class CalendarManager:
         google_service,
         google_calendar_id_env: str = "GOOGLE_CALENDAR_ID",
     ):
-        self.client = caldav.DAVClient(url, username=username, password=password)
+        super().__init__(url, username, password)
         self.calendar = self.client.calendar(url=url)
 
         self.google_service = google_service
         self.google_calendar_id = os.environ[google_calendar_id_env]
 
-    def list(self):
-        # Returns CalendarObjectResource list
-        return self.calendar.search(event=True)
+    def list(
+            self,
+            start_date: datetime | None = None,
+            end_date: datetime | None = None,
+    ) -> list[CalendarObjectResource]:
+
+        # Default start_date = today at 00:00 (local time)
+        if start_date is None:
+            today = datetime.now().date()
+            start_date = datetime.combine(today, time.min)
+
+        if end_date is None:
+            end_date = start_date + timedelta(days=30)
+
+        return self.calendar.search(
+            start=start_date,
+            end=end_date,
+            event=True,
+            expand=True,
+        )
 
     def add(self, title: str, start: datetime, end: datetime):
         return self.calendar.save_event(dtstart=start, dtend=end, summary=title)
 
-    def delete(self, item):
+    def delete(self, item: CalendarObjectResource):
         item.delete()
 
-    def update(self, item, *, new_title=None, new_desc=None):
+    def update(self, item: CalendarObjectResource, *, new_title=None, new_desc=None):
         v = item.vobject_instance
         if not hasattr(v, "vevent"):
             raise ValueError("Not a VEVENT")
@@ -163,3 +181,108 @@ class CalendarManager:
             item.save()
 
         return updated
+
+    def summary(self, start_date: datetime | None = None, end_date: datetime | None = None) -> str:
+        """
+        Return the string to display the list of events in the calendar between the two dates.
+        Each item displays: title, description, date/time, attendees (if any).
+        """
+        items = self.list(start_date=start_date, end_date=end_date)
+
+        def _fmt_dt(dt: object) -> str:
+            # vobject can give datetime/date-like objects; try common representations
+            if isinstance(dt, datetime):
+                return dt.strftime("%Y-%m-%d %H:%M")
+            # date (no time)
+            try:
+                return dt.strftime("%Y-%m-%d")  # type: ignore[attr-defined]
+            except Exception:
+                return str(dt)
+
+        lines: list[str] = []
+        for item in items:
+            v = item.vobject_instance
+            if not hasattr(v, "vevent"):
+                # Skip non-VEVENT components
+                continue
+            ev = v.vevent
+
+            uid = ev.uid.value
+            title = ev.summary.value
+            desc = ev.description.value
+
+
+            start = None
+            end = None
+            if hasattr(ev, "dtstart") and hasattr(ev.dtstart, "value"):
+                start = ev.dtstart.value
+            if hasattr(ev, "dtend") and hasattr(ev.dtend, "value"):
+                end = ev.dtend.value
+
+            when = ""
+            if start is not None and end is not None:
+                when = f"{_fmt_dt(start)} → {_fmt_dt(end)}"
+            elif start is not None:
+                when = f"Starts: {_fmt_dt(start)}"
+            elif end is not None:
+                when = f"Ends: {_fmt_dt(end)}"
+            else:
+                when = "(no time)"
+
+            attendees: list[str] = []
+            if hasattr(ev, "attendee"):
+                att = ev.attendee
+                if isinstance(att, list):
+                    props = att
+                else:
+                    props = [att]
+
+                for a in props:
+                    if hasattr(a, "value") and a.value:
+                        attendees.append(str(a.value))
+
+            lines.append(f"- {title}")
+            lines.append(f"  UID: {uid}")
+            lines.append(f"  When: {when}")
+            if desc:
+                lines.append(f"  Description: {desc}")
+            if attendees:
+                lines.append("  Attendees:")
+                for a in attendees:
+                    lines.append(f"    - {a}")
+            lines.append("")  # blank line between events
+
+        if not lines:
+            return "No events."
+
+        # Trim trailing blank line
+        if lines[-1] == "":
+            lines.pop()
+
+        return "\n".join(lines)
+
+    def get(self, uid: str) -> CalendarObjectResource | None:
+        """
+        Find a single VEVENT by its iCal UID.
+        Returns the first match, or None if not found.
+        """
+        # CalDAV search can filter by UID in many servers; if not supported,
+        # we fall back to scanning recent items.
+        try:
+            results = self.calendar.search(uid=uid, event=True)
+            if results:
+                return results[0]
+        except TypeError:
+            # Some caldav backends don't accept uid=... in search()
+            pass
+
+        # Fallback: scan a reasonable window and match UID client-side
+        for item in self.list():
+            v = item.vobject_instance
+            if not hasattr(v, "vevent"):
+                continue
+            ev = v.vevent
+            if hasattr(ev, "uid") and getattr(ev.uid, "value", None) == uid:
+                return item
+
+        return None

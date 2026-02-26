@@ -5,6 +5,7 @@ from datetime import datetime
 
 from dotenv import load_dotenv
 
+from managers.manager import Manager
 from utils import (
     find_caldav_item_by_title,
     find_contact_url_by_name,
@@ -22,7 +23,6 @@ def build_parser():
 
     top = parser.add_subparsers(dest="kind", required=True)
 
-    # For each resource type
     for kind in ["event", "task", "journal", "contact"]:
         kind_parser = top.add_parser(kind)
         kind_parser.set_defaults(_kind_parser=kind_parser)
@@ -30,6 +30,10 @@ def build_parser():
 
         # LIST
         actions.add_parser("list")
+
+        # GET (UID-based)
+        get_cmd = actions.add_parser("get")
+        get_cmd.add_argument("--uid", required=True)
 
         # ADD
         add = actions.add_parser("add")
@@ -54,9 +58,7 @@ def build_parser():
                 "--status", help="NEEDS-ACTION | IN-PROCESS | COMPLETED | CANCELLED"
             )
             add.add_argument("--percent-complete", type=int, dest="percent_complete")
-            add.add_argument(
-                "--categories", nargs="+", help="One or more category strings"
-            )
+            add.add_argument("--categories", nargs="+", help="One or more category strings")
             add.add_argument("--location")
             add.add_argument("--url")
 
@@ -81,9 +83,9 @@ def build_parser():
             g_misc.add_argument("--birthday", help="YYYY-MM-DD")
             g_misc.add_argument("--note", help="Any note")
 
-        # UPDATE
+        # UPDATE (UID-based)
         update = actions.add_parser("update")
-        update.add_argument("--find", required=True)
+        update.add_argument("--uid", required=True)
 
         if kind == "event":
             update.add_argument("--new-title")
@@ -110,28 +112,17 @@ def build_parser():
             g_social.add_argument("--new-github")
 
             g_misc = update.add_argument_group("Other")
-            g_misc.add_argument("--new-birthday")
+            g_misc.add_argument("--new-birthday", help="YYYY-MM-DD")
             g_misc.add_argument("--new-note")
         elif kind == "task":
             update.add_argument("--new-title")
             update.add_argument("--new-desc")
             update.add_argument("--new-priority", type=int, dest="new_priority")
-            update.add_argument(
-                "--new-due", dest="new_due", help="YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS"
-            )
-            update.add_argument(
-                "--new-start",
-                dest="new_start",
-                help="YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS",
-            )
-            update.add_argument(
-                "--new-status",
-                dest="new_status",
-                help="NEEDS-ACTION | IN-PROCESS | COMPLETED | CANCELLED",
-            )
-            update.add_argument(
-                "--new-percent-complete", type=int, dest="new_percent_complete"
-            )
+            update.add_argument("--new-due", dest="new_due", help="YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS")
+            update.add_argument("--new-start", dest="new_start", help="YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS")
+            update.add_argument("--new-status", dest="new_status",
+                                help="NEEDS-ACTION | IN-PROCESS | COMPLETED | CANCELLED")
+            update.add_argument("--new-percent-complete", type=int, dest="new_percent_complete")
             update.add_argument("--new-categories", nargs="+", dest="new_categories")
             update.add_argument("--new-location", dest="new_location")
             update.add_argument("--new-url", dest="new_url")
@@ -139,12 +130,11 @@ def build_parser():
             update.add_argument("--new-title")
             update.add_argument("--new-desc")
 
-        # DELETE
+        # DELETE (UID-based)
         delete = actions.add_parser("delete")
-        delete.add_argument("--find", required=True)
+        delete.add_argument("--uid", required=True)
 
     return parser
-
 
 def main():
     user = get_env("RADICALE_USER")
@@ -166,19 +156,7 @@ def main():
     try:
         # ---------------- LIST ----------------
         if args.action == "list":
-            print(f"{'TYPE':<10} | SUMMARY / NAME")
-            print("-" * 50)
-
-            if args.kind == "contact":
-                for url in mgr.list():
-                    v = mgr.get(url)
-                    name = extract_display_name(v) or "Unnamed"
-                    extra = format_contact_extra(v)
-                    print(f"{'contact':<10} | {name}{extra}")
-            else:
-                for item in mgr.list():
-                    name = extract_display_name(item.vobject_instance) or "Unnamed"
-                    print(f"{args.kind:<10} | {name}")
+            print(mgr.summary())
 
         # ---------------- ADD ----------------
         elif args.action == "add":
@@ -186,7 +164,6 @@ def main():
                 s = datetime.strptime(args.start, "%Y-%m-%d %H:%M")
                 e = datetime.strptime(args.end, "%Y-%m-%d %H:%M")
                 created = mgr.add(args.title, s, e)
-
                 if args.invite:
                     mgr.invite(created, args.invite)
 
@@ -226,14 +203,14 @@ def main():
 
         # ---------------- UPDATE ----------------
         elif args.action == "update":
-            if args.kind == "contact":
-                url = find_contact_url_by_name(mgr, args.find)
-                if not url:
-                    print("Not found")
-                    sys.exit(1)
+            item = mgr.get(args.uid)
+            if not item:
+                print("Not found")
+                sys.exit(1)
 
+            if args.kind == "contact":
                 mgr.update(
-                    url,
+                    item,
                     new_name=args.new_name,
                     new_email=args.new_email,
                     new_phone=args.new_phone,
@@ -246,61 +223,58 @@ def main():
                     new_linkedin=args.new_linkedin,
                     new_github=args.new_github,
                 )
+
+            elif args.kind == "task":
+                mgr.update(
+                    item,
+                    new_title=args.new_title,
+                    new_description=args.new_desc,
+                    new_priority=args.new_priority,
+                    new_due=args.new_due,
+                    new_start=args.new_start,
+                    new_status=args.new_status,
+                    new_percent_complete=args.new_percent_complete,
+                    new_categories=args.new_categories,
+                    new_location=args.new_location,
+                    new_url=args.new_url,
+                )
+
             else:
-                items = mgr.list()
-                target = find_caldav_item_by_title(items, args.find)
-                if not target:
-                    print("Not found")
-                    sys.exit(1)
+                mgr.update(
+                    item,
+                    new_title=args.new_title,
+                    new_desc=args.new_desc,
+                )
 
-                if args.kind == "task":
-                    mgr.update(
-                        target,
-                        new_title=args.new_title,
-                        new_description=args.new_desc,
-                        new_priority=args.new_priority,
-                        new_due=args.new_due,
-                        new_start=args.new_start,
-                        new_status=args.new_status,
-                        new_percent_complete=args.new_percent_complete,
-                        new_categories=args.new_categories,
-                        new_location=args.new_location,
-                        new_url=args.new_url,
-                    )
-                else:
-                    mgr.update(
-                        target,
-                        new_title=args.new_title,
-                        new_desc=args.new_desc,
-                    )
-
-                    if args.kind == "event" and args.invite:
-                        mgr.invite(target, args.invite)
+                if args.kind == "event" and args.invite:
+                    mgr.invite(item, args.invite)
 
             print("Success")
 
         # ---------------- DELETE ----------------
         elif args.action == "delete":
-            if args.kind == "contact":
-                url = find_contact_url_by_name(mgr, args.find)
-                if not url:
-                    print("Not found")
-                    sys.exit(1)
-                mgr.delete(url)
-            else:
-                items = mgr.list()
-                target = find_caldav_item_by_title(items, args.find)
-                if not target:
-                    print("Not found")
-                    sys.exit(1)
-                mgr.delete(target)
+            item = mgr.get(args.uid)
+            if not item:
+                print("Not found")
+                sys.exit(1)
 
+            mgr.delete(item)
             print("Success")
+
+        # ---------------- GET ----------------
+        elif args.action == "get":
+            item = mgr.get(args.uid)
+            if not item:
+                print("Not found")
+                sys.exit(1)
+            print(mgr.display(item))
 
     except Exception as e:
         print(f"Operation failed: {e}")
         raise e
         sys.exit(1)
+
+
 
 
 if __name__ == "__main__":
