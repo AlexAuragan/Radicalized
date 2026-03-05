@@ -209,8 +209,10 @@ class CalendarManager(Manager[CalendarObjectResource]):
 
             uid = ev.uid.value
             title = ev.summary.value
-            desc = ev.description.value
-
+            if hasattr(ev, "description"):
+                desc = ev.description.value
+            else:
+                desc = ""
 
             start = None
             end = None
